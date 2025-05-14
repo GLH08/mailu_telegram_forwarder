@@ -1,0 +1,14 @@
+services: # 移除了过时的 'version' 属性
+  mail_forwarder:
+    build: .
+    container_name: mailu_telegram_forwarder
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # 将本地的 'app' 目录挂载到容器内 'app' 包应该在的位置
+      - ./app:/usr/src/project/app
+      # 如果 requirements.txt 也希望在开发时热更新（虽然不常见，通常是构建时处理）
+      # - ./requirements.txt:/usr/src/project/requirements.txt
+    networks:
+      default: {}

@@ -1,0 +1,8 @@
+python-dotenv
+imapclient
+python-telegram-bot~=13.7
+beautifulsoup4
+html2text
+Pillow
+chardet
+markdownify
