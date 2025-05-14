@@ -12,7 +12,12 @@ from .telegram_sender import forward_email_to_telegram # Ensure this is the upda
 logger = logging.getLogger(__name__)
 
 CONNECTION_TIMEOUT_SECONDS = 30
-IDLE_CHECK_TIMEOUT_SECONDS = 25 * 60
+IDLE_CHECK_TIMEOUT_SECONDS = 25 * 60 # 25 minutes
+INITIAL_RECONNECT_DELAY_SECONDS = 5
+MAX_RECONNECT_DELAY_SECONDS = 300 # 5 minutes
+RECONNECT_BACKOFF_FACTOR = 2
+MAX_CONNECTION_ATTEMPTS_BEFORE_LONG_PAUSE = 5 # After 5 failed attempts, take a long pause
+LONG_PAUSE_SECONDS = 10 * 60 # 10 minutes
 
 class IMAPHandler:
     def __init__(self):
@@ -20,6 +25,8 @@ class IMAPHandler:
         self.password = config.IMAP_PASSWORD; self.mailbox = config.IMAP_MAILBOX
         self.processed_folder = config.PROCESSED_FOLDER_NAME; self.client = None
         self.is_mailbox_selected = False; self.ssl_context = ssl.create_default_context()
+        self.connection_attempts = 0 # Initialize connection_attempts
+        self.current_reconnect_delay = INITIAL_RECONNECT_DELAY_SECONDS # Initialize current_reconnect_delay
 
     def _close_existing_client(self):
         if self.client:
