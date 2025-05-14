@@ -7,12 +7,15 @@
 *   **实时邮件监控**: 通过 IMAP IDLE 近乎实时地接收新邮件通知。
 *   **内容解析**:
     *   智能解析邮件头部 (主题, 发件人, 收件人, 抄送, 日期, Message-ID)。
-    *   提取邮件正文，优先使用 `markdownify` 将 HTML 内容转换为 Markdown，并支持多种回退机制 (`html2text`, `BeautifulSoup`)。
+    *   提取邮件正文。对于 HTML 格式的邮件，优先尝试将其**渲染为图片**发送，以最大限度保留原始排版和视觉效果。
+        *   如果 HTML 转图片失败或邮件无 HTML 内容，则回退到将 HTML 内容转换为 Markdown (优先使用 `markdownify`，支持 `html2text`, `BeautifulSoup` 作为备选) 或使用纯文本正文。
+        *   **长图片自动分割**：当渲染后的邮件图片过高导致无法直接发送时，会自动将其垂直切割成多张较小的图片分部分发送。
     *   提取附件信息。
 *   **高度可配置的Telegram消息**:
+    *   **邮件正文图片化**：HTML 邮件正文默认尝试以图片形式发送，邮件头部信息作为图片的说明文字。
     *   **自定义邮件头显示**: 用户可以通过 `TELEGRAM_HEADER_FIELDS` 选择在 Telegram 消息中显示哪些邮件头部信息 (如主题, 发件人, 日期, 重要性等)。
     *   **重要性标记**: 自动检测邮件的重要性 (高/低)，并在 Telegram 消息中以特殊图标 (❗/📉) 突出显示。
-    *   **引用处理**: 用户可以通过 `EMAIL_QUOTE_HANDLING` 自定义如何处理邮件中的引用内容 (移除, 转为Markdown引用, 或仅保留文本)。
+    *   **引用处理**: 用户可以通过 `EMAIL_QUOTE_HANDLING` 自定义如何处理邮件中的引用内容 (移除, 转为Markdown引用, 或仅保留文本)，此处理应用于文本回退模式。
     *   **图片附件预览**: 可选将支持的图片类型附件 (JPG, PNG, GIF) 直接作为图片预览发送，而非普通文件 (通过 `TELEGRAM_IMAGE_PREVIEW` 和 `TELEGRAM_IMAGE_PREVIEW_MAX_SIZE_MB` 控制)。
 *   **细粒度转发规则**:
     *   **发件人过滤**: 支持基于正则表达式的发件人黑名单 (`FILTER_SENDER_BLACKLIST_REGEX`) 和白名单 (`FILTER_SENDER_WHITELIST_REGEX`)。
@@ -32,9 +35,11 @@
 *   `imapclient`: IMAP 交互
 *   `python-telegram-bot` (v13.x): Telegram Bot API 通信
 *   `python-dotenv`: 环境变量管理
-*   `markdownify`: HTML 到 Markdown 转换
-*   `html2text`: HTML 到文本转换 (备选)
-*   `BeautifulSoup4`: HTML 解析 (备选)
+*   `markdownify`: HTML 到 Markdown 转换 (文本回退模式)
+*   `html2text`: HTML 到文本转换 (文本回退模式备选)
+*   `BeautifulSoup4`: HTML 解析 (文本回退模式备选)
+*   `imgkit`: HTML 到图片转换，依赖 `wkhtmltopdf`。
+*   `Pillow`: 图像处理库，用于图片分割。
 *   `chardet`: 字符编码检测
 *   `asyncio`: 异步 I/O
 *   Docker & Docker Compose
@@ -73,11 +78,12 @@ mailu_telegram_forwarder/
     cp .env.example .env
     ```
     然后编辑 `.env` 文件，填入您的配置信息 (详见下面的“配置”部分)。
+    确保您的系统已安装 Docker 和 Docker Compose。
 3.  **构建并启动 Docker 容器**:
     ```bash
     docker-compose up -d --build
     ```
-    服务将在后台运行。
+    此命令会根据 `Dockerfile` 构建镜像，其中包含了安装 `wkhtmltopdf` 等系统依赖的步骤。服务将在后台运行。
 
     查看日志:
     ```bash
@@ -179,9 +185,11 @@ mailu_telegram_forwarder/
     *   应用会首先根据配置的过滤规则 (发件人白/黑名单, 主题黑名单) 判断是否需要处理该邮件。
     *   如果邮件通过过滤，应用会解析邮件内容。
     *   根据 `FORWARD_BODY` 和 `FORWARD_ATTACHMENTS` 配置，决定是否包含正文和附件。
-    *   根据 `EMAIL_QUOTE_HANDLING` 处理邮件引用。
-    *   根据 `TELEGRAM_HEADER_FIELDS` 格式化邮件头部信息，并根据 `TELEGRAM_IMAGE_PREVIEW` 尝试发送图片预览。
-    *   最终将格式化后的消息和附件（如果配置转发）发送到指定的 `TELEGRAM_CHAT_ID`。
+    *   **HTML 邮件正文处理**：
+        *   如果邮件包含 HTML 内容且 `FORWARD_BODY` 为 `true`，应用会首先尝试将 HTML 正文渲染成一张或多张图片（如果过长则自动分割）发送到 Telegram，邮件头部信息将作为图片的说明文字。
+        *   如果 HTML 转图片失败，或者邮件不含 HTML 内容，应用将回退到发送文本格式的正文。此时，会根据 `EMAIL_QUOTE_HANDLING` 处理邮件引用，并根据 `TELEGRAM_HEADER_FIELDS` 格式化邮件头部信息（如果图片发送失败，头部信息会单独发送）。
+    *   **附件处理**：根据 `TELEGRAM_IMAGE_PREVIEW` 尝试发送图片附件的预览。
+    *   最终将格式化后的消息（图片或文本）和附件（如果配置转发）发送到指定的 `TELEGRAM_CHAT_ID`。
     *   成功转发后，邮件会在 IMAP 服务器上被标记为已读或移动到 `PROCESSED_FOLDER_NAME` (如果已配置)。
 4.  监控应用日志以了解其运行状态和任何潜在问题。
 
