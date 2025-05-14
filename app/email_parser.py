@@ -94,80 +94,81 @@ def handle_email_quotes(text_body):
     return "\n".join(processed_lines).strip()
 
 def get_email_body(msg):
-    body_plain = ""; body_html = ""
+    body_plain = ""
+    body_html_raw = "" # Store raw HTML here
     if msg.is_multipart():
         for part in msg.walk():
-            content_type = part.get_content_type(); content_disposition = str(part.get("Content-Disposition", "")).lower()
+            content_type = part.get_content_type()
+            content_disposition = str(part.get("Content-Disposition", "")).lower()
             if "attachment" not in content_disposition:
                 payload = part.get_payload(decode=True)
                 if payload is None: continue
                 charset = part.get_content_charset() or chardet.detect(payload).get('encoding') or 'utf-8'
-                try: decoded_payload = payload.decode(charset, errors='replace')
-                except Exception: decoded_payload = payload.decode('utf-8', errors='replace')
+                try:
+                    decoded_payload = payload.decode(charset, errors='replace')
+                except Exception:
+                    decoded_payload = payload.decode('utf-8', errors='replace')
                 
-                if content_type == "text/plain" and not body_plain: body_plain = decoded_payload
-                elif content_type == "text/html" and not body_html: body_html = decoded_payload
+                if content_type == "text/plain" and not body_plain:
+                    body_plain = decoded_payload
+                elif content_type == "text/html" and not body_html_raw:
+                    body_html_raw = decoded_payload # Store raw HTML
     else:
         payload = msg.get_payload(decode=True)
         if payload:
             charset = msg.get_content_charset() or chardet.detect(payload).get('encoding') or 'utf-8'
-            try: decoded_payload = payload.decode(charset, errors='replace')
-            except Exception: decoded_payload = payload.decode('utf-8', errors='replace')
+            try:
+                decoded_payload = payload.decode(charset, errors='replace')
+            except Exception:
+                decoded_payload = payload.decode('utf-8', errors='replace')
 
-            if msg.get_content_type() == "text/plain": body_plain = decoded_payload
-            elif msg.get_content_type() == "text/html": body_html = decoded_payload
+            if msg.get_content_type() == "text/plain":
+                body_plain = decoded_payload
+            elif msg.get_content_type() == "text/html":
+                body_html_raw = decoded_payload # Store raw HTML
 
-    final_body_text = ""
-    processed_html_successfully = False
+    final_body_text_for_markdown = ""
+    processed_html_successfully_for_markdown = False
 
-    if body_html:
+    if body_html_raw: # Use body_html_raw for text conversion
         try:
-            # Try markdownify first
-            # Configure markdownify: strip unwanted tags, convert headings, etc.
-            # Example: markdownify.markdownify(body_html, heading_style=markdownify.টেড_HEADING, strip=['script', 'style'])
-            final_body_text = markdownify.markdownify(body_html, heading_style="ATX", strip=['script', 'style']).strip()
+            final_body_text_for_markdown = markdownify.markdownify(body_html_raw, heading_style="ATX", strip=['script', 'style']).strip()
             logger.debug(f"[{time.strftime('%H:%M:%S')}] Successfully converted HTML to Markdown using markdownify.")
-            processed_html_successfully = True
+            processed_html_successfully_for_markdown = True
         except Exception as e_md:
             logger.warning(f"[{time.strftime('%H:%M:%S')}] markdownify conversion failed: {e_md}. Falling back to html2text.")
             try:
                 h = html2text.HTML2Text()
-                h.ignore_links = False
-                h.ignore_images = True
-                h.body_width = 0
-                h.unicode_snob = True
-                h.emphasis_mark = '*'
-                h.strong_mark = '**'
-                final_body_text = h.handle(body_html).strip()
+                h.ignore_links = False; h.ignore_images = True; h.body_width = 0
+                h.unicode_snob = True; h.emphasis_mark = '*'; h.strong_mark = '**'
+                final_body_text_for_markdown = h.handle(body_html_raw).strip()
                 logger.debug(f"[{time.strftime('%H:%M:%S')}] Successfully converted HTML to text using html2text.")
-                processed_html_successfully = True
+                processed_html_successfully_for_markdown = True
             except Exception as e_h2t:
                 logger.error(f"[{time.strftime('%H:%M:%S')}] html2text conversion also failed: {e_h2t}. Falling back to BeautifulSoup.")
                 try:
-                    soup = BeautifulSoup(body_html, "html.parser")
-                    final_body_text = soup.get_text(separator="\n").strip()
+                    soup = BeautifulSoup(body_html_raw, "html.parser")
+                    final_body_text_for_markdown = soup.get_text(separator="\n").strip()
                     logger.debug(f"[{time.strftime('%H:%M:%S')}] Extracted text using BeautifulSoup.")
-                    processed_html_successfully = True # Considered successful for text extraction
+                    processed_html_successfully_for_markdown = True
                 except Exception as e_bs:
                     logger.error(f"[{time.strftime('%H:%M:%S')}] BeautifulSoup text extraction failed: {e_bs}")
-                    # If all HTML processing fails, body_html content is lost for now.
-                    # We might assign body_html to final_body_text directly if we want raw html as last resort.
-                    final_body_text = "" # Or some error message like "_[HTML parsing failed]_"
+                    final_body_text_for_markdown = ""
 
-    if not processed_html_successfully and body_plain:
+    if not processed_html_successfully_for_markdown and body_plain:
         logger.debug(f"[{time.strftime('%H:%M:%S')}] Using plain text body as HTML processing was not successful or HTML body was empty.")
-        final_body_text = body_plain.strip()
-    elif not body_html and body_plain: # Only plain text was available
+        final_body_text_for_markdown = body_plain.strip()
+    elif not body_html_raw and body_plain:
         logger.debug(f"[{time.strftime('%H:%M:%S')}] No HTML body found, using plain text body.")
-        final_body_text = body_plain.strip()
+        final_body_text_for_markdown = body_plain.strip()
     
-    # Apply quote handling to the chosen text
-    cleaned_body = handle_email_quotes(final_body_text)
+    cleaned_body_for_markdown = handle_email_quotes(final_body_text_for_markdown)
 
-    if not cleaned_body.strip() and not (config.EMAIL_QUOTE_HANDLING == 'remove' and final_body_text.strip()):
-         # If cleaned_body is empty, but it wasn't because 'remove' mode cleared actual content
-        return "_[邮件正文为空]_"
-    return cleaned_body
+    if not cleaned_body_for_markdown.strip() and not (config.EMAIL_QUOTE_HANDLING == 'remove' and final_body_text_for_markdown.strip()):
+        cleaned_body_for_markdown = "_[邮件正文为空]_"
+    
+    # Return both raw HTML (if available) and the processed text body
+    return body_html_raw if body_html_raw else None, cleaned_body_for_markdown
 
 def get_attachments(msg):
     attachments = []
@@ -214,12 +215,13 @@ def parse_email(raw_email_bytes, uid=None):
         email_importance = "low"
     # 'normal' (Importance) or '3' (X-Priority) or empty/not present defaults to 'normal'
 
-    body = get_email_body(msg) # Gets only text body
-    attachments = get_attachments(msg) # Gets only actual file attachments
+    body_html_raw, body_text_processed = get_email_body(msg) # Now returns two values
+    attachments = get_attachments(msg)
 
     return {"uid": uid, "subject": subject, "from": from_, "to": to_, "cc": cc_ if cc_ else "N/A",
             "date": email_date_obj.strftime("%Y-%m-%d %H:%M:%S %Z") if email_date_obj else date_str or "N/A",
-            "body": body,
+            "body_html": body_html_raw, # Add raw HTML body
+            "body": body_text_processed, # This is the text version for fallback or if no HTML
             "importance": email_importance,
             "attachments": attachments,
             "message_id": msg.get("Message-ID", "N/A")}

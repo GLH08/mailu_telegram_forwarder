@@ -6,3 +6,4 @@ html2text
 Pillow
 chardet
 markdownify
+imgkit

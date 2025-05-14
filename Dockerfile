@@ -7,6 +7,14 @@ WORKDIR /usr/src/project
 # 复制 requirements.txt 到工作目录
 COPY requirements.txt .
 
+# 安装系统依赖 for wkhtmltoimage and Pillow
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    wkhtmltopdf \
+    libjpeg-dev \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 # 安装 requirements.txt 中指定的任何所需包
 RUN pip install --no-cache-dir -r requirements.txt
 
